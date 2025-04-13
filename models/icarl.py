@@ -66,6 +66,7 @@ class ICarl(ContinualModel):
             assert args.dataset == 'seq-cifar100', 'The original iCaRL transform is only available for CIFAR-100.'
 
         super().__init__(backbone, loss, args, transform, dataset=dataset)
+        self.dataset = get_dataset(args)
 
         # Instantiate buffers
         self.buffer = Buffer(self.args.buffer_size)
@@ -83,7 +84,7 @@ class ICarl(ContinualModel):
 
     def forward(self, x):
         if self.class_means is None:
-            logging.info('Computing class means...')
+            print('Computing class means...')
             with torch.no_grad():
                 self.compute_class_means()
                 self.class_means = self.class_means.squeeze()

@@ -12,7 +12,6 @@ Examples:
 - When using DDP, you might need the `wait_for_master` function.
     - Synchronization before and after training is handled automatically.
 """
-import logging
 import os
 import sys
 
@@ -41,10 +40,10 @@ def setup(rank: int, world_size: int) -> None:
     os.environ['MASTER_PORT'] = str(port)
 
     # initialize the process group
-    logging.info(f"Running basic DDP example on rank {rank}/{world_size} (host {host}, node {os.environ['SLURMD_NODENAME']} port {port}).")
+    print(f"Running basic DDP example on rank {rank}/{world_size} (host {host}, node {os.environ['SLURMD_NODENAME']} port {port}).")
     sys.stdout.flush()
     dist.init_process_group("gloo", rank=rank, world_size=world_size)
-    logging.info("Inited")
+    print("Inited")
     sys.stdout.flush()
 
 

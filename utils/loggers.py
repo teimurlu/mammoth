@@ -9,7 +9,6 @@ This module contains the Logger class and related functions for logging accuracy
 
 from argparse import Namespace
 from contextlib import suppress
-import logging
 import os
 import sys
 from typing import Any, Dict, Union
@@ -240,7 +239,7 @@ class Logger:
         create_if_not_exists(smart_joint(target_folder, self.setting, self.dataset, self.model))
 
         path = smart_joint(target_folder, self.setting, self.dataset, self.model, "logs.pyd")
-        logging.info("Logging results and arguments in " + path)
+        print("Logging results and arguments in " + path)
         with open(path, 'a') as f:
             f.write(str(wrargs) + '\n')
 
@@ -273,7 +272,7 @@ def log_bias_accs(args: Namespace, logger: Logger, accs, t: int, setting: str, e
 
     # Log the group statistics separately
     group_log_dict = {f"ACC_{key}": group_statistics[key] for key in group_statistics}
-    logging.info(group_log_dict)
+    print(group_log_dict)
     if not args.nowand:
         wandb.log(group_log_dict)
 

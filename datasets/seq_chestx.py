@@ -1,4 +1,3 @@
-import logging
 import os
 import torchvision.transforms as transforms
 import torch.nn.functional as F
@@ -48,7 +47,7 @@ class ChestX(Dataset):
             if download:
                 from onedrivedownloader import download
 
-                logging.info('Downloading dataset')
+                print('Downloading dataset')
                 ln = "https://unimore365-my.sharepoint.com/:u:/g/personal/215580_unimore_it/EfmFCiLaGlpFgtAuv0YLpeYBeR54I7YHK75bu_Ex78mADA?e=K8rHpZ"
                 download(ln, filename=smart_joint(root, 'chestx.zip'), unzip=True, unzip_path=root.rstrip('chestx'), clean=True)
             else:

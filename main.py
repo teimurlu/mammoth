@@ -27,7 +27,6 @@ import datetime
 import uuid
 import argparse
 import torch
-
 torch.set_num_threads(2)
 
 # if file is launched inside the `utils` folder
@@ -169,8 +168,7 @@ def parse_args():
     from utils import create_if_not_exists
     from utils.conf import warn_once
     from utils.args import add_initial_args, add_management_args, add_experiment_args, add_configuration_args, clean_dynamic_args, \
-        check_multiple_defined_arg_during_string_parse, add_dynamic_parsable_args, update_cli_defaults, get_single_arg_value, \
-        pretty_format_args
+        check_multiple_defined_arg_during_string_parse, add_dynamic_parsable_args, update_cli_defaults, get_single_arg_value
 
     from models import get_all_models
 
@@ -286,15 +284,13 @@ def parse_args():
         uid = args.conf_jobnum.split('-')[0]
         extra_ckpt_name = "" if args.ckpt_name is None else f"{args.ckpt_name}_"
         args.ckpt_name = f"{extra_ckpt_name}{args.model}_{args.dataset}_{args.dataset_config}_{args.buffer_size if hasattr(args, 'buffer_size') else 0}_{args.n_epochs}_{str(now)}_{uid}"
-        logging.info("Saving checkpoint into", args.ckpt_name, file=sys.stderr)
+        print("Saving checkpoint into", args.ckpt_name, file=sys.stderr)
 
     check_args(args)
 
     if args.validation is not None:
         logging.info(f"Using {args.validation}% of the training set as validation set.")
         logging.info(f"Validation will be computed with mode `{args.validation_mode}`.")
-
-    logging.info('\n' + pretty_format_args(args, parser))
 
     return args
 
@@ -326,7 +322,7 @@ def extend_args(args, dataset):
             assert dataset.SETTING in ['class-il', 'task-il'], "`current` validation modes is only supported for class-il and task-il settings (requires a task division)."
 
     if args.debug_mode:
-        logging.warning('Debug mode enabled: running only a few forward steps per epoch with W&B disabled.')
+        print('Debug mode enabled: running only a few forward steps per epoch with W&B disabled.')
         # set logging level to debug
         args.nowand = 1
 
@@ -339,7 +335,7 @@ def extend_args(args, dataset):
         logging.info('`wandb_entity` and `wandb_project` not set. Disabling wandb.')
         args.nowand = 1
     else:
-        logging.info('Logging to wandb: {}/{}'.format(args.wandb_entity, args.wandb_project))
+        print('Logging to wandb: {}/{}'.format(args.wandb_entity, args.wandb_project))
         args.nowand = 0
 
 
@@ -383,21 +379,11 @@ def main(args=None):
         # check if the model is compatible with torch.compile
         # from https://pytorch.org/tutorials/intermediate/torch_compile_tutorial.html
         if torch.cuda.get_device_capability()[0] >= 7 and os.name != 'nt':
-            logging.warning(
-                "\n╔═══════════════════════════ IMPORTANT ══════════════════════════╗\n"
-                "║                                                                ║\n"
-                "║  Model being compiled with `torch.compile`!                    ║\n"
-                "║                                                                ║\n"
-                "║  • Your code may break if you modify the model structure       ║\n"
-                "║    after the first run                                         ║\n"
-                "║                                                                ║\n"
-                "║  • This includes adding classifiers for new tasks,             ║\n"
-                "║    changing the backbone, etc.                                 ║\n"
-                "║                                                                ║\n"
-                "║  • Some models MODIFY the backbone during initialization       ║\n"
-                "║    Remember to call torch.compile again after such changes     ║\n"
-                "║                                                                ║\n"
-                "╚════════════════════════════════════════════════════════════════╝")
+            print("================ Compiling model with torch.compile ================")
+            logging.warning("`torch.compile` may break your code if you change the model after the first run!")
+            print("This includes adding classifiers for new tasks, changing the backbone, etc.")
+            print("ALSO: some models CHANGE the backbone during initialization. Remember to call `torch.compile` again after that.")
+            print("====================================================================")
             backbone = torch.compile(backbone)
         else:
             if torch.cuda.get_device_capability()[0] < 7:

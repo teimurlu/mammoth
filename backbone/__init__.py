@@ -1,9 +1,11 @@
 from argparse import Namespace
 import importlib
+import inspect
 import os
 import math
 import csv
 
+import numpy as np
 import torch
 import torch.nn as nn
 from datetime import datetime
@@ -530,7 +532,7 @@ class MammothBackbone(nn.Module):
                         #     f"(Total epochs dead: {total_epochs})"
                         # )
 
-    def check_inactive_neurons(self, threshold=0.1):
+    def check_inactive_neurons(self, threshold=0.1, show_histogram=False):
         """
         Analyze inactive neurons in each layer based on the stored activations.
         A neuron is considered inactive if its mean activation value is below the threshold.
@@ -542,6 +544,14 @@ class MammothBackbone(nn.Module):
             dict: Dictionary containing inactive neuron statistics for each layer
         """
         inactive_stats = {}
+
+        if show_histogram:
+            import matplotlib.pyplot as plt
+
+            fig_size = (15, 10)
+            num_layers = len(self.activations)
+            fig, axs = plt.subplots(num_layers, 1, figsize=fig_size, squeeze=False)
+            layer_index = 0
 
         for layer_name, activation in self.activations.items():
             # Move activation to CPU and convert to numpy for analysis
@@ -596,6 +606,79 @@ class MammothBackbone(nn.Module):
             print(f"Min activation: {stats['min_activation']:.6f}")
             print(f"Max activation: {stats['max_activation']:.6f}")
 
+            if show_histogram:
+                ax = axs[layer_index, 0]
+
+                all_activations = reshaped_act.flatten()
+
+                max_samples = 100000
+                if len(all_activations) > max_samples:
+                    indices = np.random.choice(
+                        len(all_activations), max_samples, replace=False
+                    )
+                    all_activations = all_activations[indices]
+
+                # Plot histogram of mean activations
+                counts, edges, _ = ax.hist(
+                    (mean_activations - np.min(mean_activations))
+                    / (np.max(mean_activations) - np.min(mean_activations) + 1e-10),
+                    bins=50,
+                    alpha=0.7,
+                    density=False,
+                    color="steelblue",
+                )
+
+                # Draw vertical line at threshold
+                ax.axvline(
+                    x=threshold,
+                    color="red",
+                    linestyle="--",
+                    label=f"Threshold ({threshold})",
+                )
+
+                # Highlight inactive neuron region
+                ax.axvspan(
+                    0,
+                    threshold,
+                    alpha=0.2,
+                    color="red",
+                    label=f'Inactive: {inactive_count}/{channels} ({stats["inactive_percentage"]:.1f}%)',
+                )
+
+                # Add title and labels
+                ax.set_title(f"Layer: {layer_name} - Activation Distribution")
+                ax.set_xlabel("Mean Absolute Activation")
+                ax.set_ylabel("Number of Neurons")
+                ax.legend()
+
+                # Add text with statistics
+                # stats_text = (
+                #     f"Total neurons: {channels}\n"
+                #     f"Dead neurons: {stats['dead_count']} ({stats['dead_percentage']:.1f}%)\n"
+                #     f"Inactive neurons: {stats['inactive_count']} ({stats['inactive_percentage']:.1f}%)\n"
+                #     f"Mean: {stats['mean_activation']:.4f}\n"
+                #     f"Median: {float(np.median(mean_activations)):.4f}\n"
+                #     f"Min: {stats['min_activation']:.4f}\n"
+                #     f"Max: {stats['max_activation']:.4f}"
+                # )
+                # ax.text(
+                #     0.98,
+                #     0.95,
+                #     stats_text,
+                #     transform=ax.transAxes,
+                #     verticalalignment="top",
+                #     horizontalalignment="right",
+                #     bbox=dict(boxstyle="round", facecolor="white", alpha=0.9),
+                # )
+
+                layer_index += 1
+
+        # Finalize and show/save the histogram plot if requested
+        if show_histogram:
+            plt.tight_layout()
+            plt.show()
+            # plt.close(fig)
+
         return inactive_stats
 
     def analyze_layer_activations(
@@ -622,8 +705,13 @@ class MammothBackbone(nn.Module):
         zero_percentage = np.mean(reshaped_act <= dead_threshold, axis=(0, 2)) * 100
 
         mean_activations = np.mean(np.abs(reshaped_act), axis=(0, 2))
-        inactive_mask = mean_activations <= dead_threshold
+        # Normalize mean activations to [0, 1] range
+        normalized_mean_activations = (mean_activations - np.min(mean_activations)) / (
+            np.max(mean_activations) - np.min(mean_activations) + 1e-10
+        )
+        inactive_mask = normalized_mean_activations <= dead_threshold
         inactive_neurons = np.where(inactive_mask)[0]
+
         print(f"\nLayer: {layer_name}")
         # print("inactive_mask: ", inactive_mask)
         # print("Inactive Neurons: ", np.where(inactive_mask)[0])

@@ -144,18 +144,18 @@ def modify_reinitialization_method(use_ghada=False):
             f.write(content)
 
     if use_ghada:
-        method = "ghada"
+        method = "method1"
     else:
-        method = "ours"
+        method = "method2"
 
     # Find the line in end_epoch method that calls reinitialize_reviving_neurons_*
     if "self.reinitialize_reviving_neurons_" in content:
         new_content = content.replace(
-            "self.reinitialize_reviving_neurons_ours",
+            "self.reinitialize_reviving_neurons_method2",
             f"self.reinitialize_reviving_neurons_{method}",
         )
         new_content = new_content.replace(
-            "self.reinitialize_reviving_neurons_ghada",
+            "self.reinitialize_reviving_neurons_method1",
             f"self.reinitialize_reviving_neurons_{method}",
         )
     else:
@@ -186,7 +186,7 @@ def main():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
 
     # Seeds to use for all experiments
-    seeds = [42, 57]
+    seeds = [42]
 
     # Basic experiment configurations
     for seed in seeds:
@@ -202,7 +202,7 @@ def main():
             # Modify activation function
             # modify_activation(activation)
 
-            for dead_threshold in [0.1, 0.2, 0.3]:
+            for dead_threshold in [0.1]:
                 # Modify dead neuron threshold
                 modify_dead_threshold(dead_threshold)
 
@@ -210,7 +210,7 @@ def main():
                     # Modify reinitialization method
                     modify_reinitialization_method(use_ghada)
 
-                    reinit_method = "ghada" if use_ghada else "ours"
+                    reinit_method = "method1" if use_ghada else "method2"
 
                     # SGD optimizer
                     sgd_cmd = f"python3 main.py --model sgd-thesis --dataset seq-cifar10 --optimizer sgd --lr 0.1 --n_epochs 10 --backbone resnet18 --seed {seed}"
@@ -218,9 +218,9 @@ def main():
                     run_experiment(sgd_cmd, output_dir, exp_name, seed=seed)
 
                     # Adam optimizer
-                    adam_cmd = f"python3 main.py --model sgd-thesis --dataset seq-cifar10 --optimizer adam --lr 0.001 --n_epochs 10 --backbone resnet18 --seed {seed}"
-                    exp_name = f"{activation}_{dead_threshold}_{reinit_method}_adam"
-                    run_experiment(adam_cmd, output_dir, exp_name, seed=seed)
+                    # adam_cmd = f"python3 main.py --model sgd-thesis --dataset seq-cifar10 --optimizer adam --lr 0.001 --n_epochs 10 --backbone resnet18 --seed {seed}"
+                    # exp_name = f"{activation}_{dead_threshold}_{reinit_method}_adam"
+                    # run_experiment(adam_cmd, output_dir, exp_name, seed=seed)
 
     # Restore files to their original state
     restore_files()

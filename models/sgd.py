@@ -15,8 +15,8 @@ class Sgd(ContinualModel):
     Finetuning baseline - simple incremental training.
     """
 
-    NAME = 'sgd'
-    COMPATIBILITY = ['class-il', 'domain-il', 'task-il', 'general-continual']
+    NAME = "sgd"
+    COMPATIBILITY = ["class-il", "domain-il", "task-il", "general-continual"]
 
     def __init__(self, backbone, loss, args, transform, dataset=None):
         super(Sgd, self).__init__(backbone, loss, args, transform, dataset=dataset)

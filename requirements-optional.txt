@@ -15,4 +15,3 @@ transformers
 kmeans_pytorch
 -i https://pypi.org/simple
 bitsandbytes
-xitorch

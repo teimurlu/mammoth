@@ -2,7 +2,6 @@
 Modified version of torchvision.datasets.CelebA to include bias labels and preprocessed splits.
 """
 
-import logging
 import os
 from collections import namedtuple
 from typing import Any, Callable, List, Optional, Tuple, Union
@@ -122,7 +121,7 @@ class BiasCelebA(VisionDataset):
 
     def download(self) -> None:
         if self._check_integrity():
-            logging.info("Files already downloaded and verified")
+            print("Files already downloaded and verified")
             return
         try:
             import gdown

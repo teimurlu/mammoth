@@ -1,4 +1,3 @@
-import logging
 import os
 import sys
 import torch
@@ -10,8 +9,6 @@ from tqdm import tqdm
 import json
 
 try:
-    import warnings
-    warnings.filterwarnings("ignore", category=UserWarning, module="deeplake")
     import deeplake
     assert int(deeplake.__version__.split('.')[0]) < 4, 'Deeplake version must be < 4. Install it with `pip install -U "deeplake<3.9"`.'
 except ImportError:
@@ -86,10 +83,10 @@ class MyCars196(Dataset):
 
         train_str = 'train' if train else 'test'
         if not os.path.exists(f'{root}/{train_str}_images.pt'):
-            logging.info(f'Preparing {train_str} dataset...', file=sys.stderr)
+            print(f'Preparing {train_str} dataset...', file=sys.stderr)
             self.load_and_preprocess_dataset(root, train_str)
         else:
-            logging.info(f"Loading pre-processed {train_str} dataset...", file=sys.stderr)
+            print(f"Loading pre-processed {train_str} dataset...", file=sys.stderr)
             self.data = torch.load(f'{root}/{train_str}_images.pt', weights_only=True)
             self.targets = torch.load(f'{root}/{train_str}_labels.pt', weights_only=True)
 
@@ -98,7 +95,7 @@ class MyCars196(Dataset):
     def load_and_preprocess_dataset(self, root, train_str='train'):
         self.data, self.targets, class_idx_to_name = load_and_preprocess_cars196(train_str)
 
-        logging.info(f"Saving pre-processed dataset in {root} ({train_str}_images.pt and {train_str}_labels.py)...", file=sys.stderr)
+        print(f"Saving pre-processed dataset in {root} ({train_str}_images.pt and {train_str}_labels.py)...", file=sys.stderr)
         if not os.path.exists(root):
             os.makedirs(root)
         torch.save(self.data, f'{root}/{train_str}_images.pt')
@@ -106,14 +103,14 @@ class MyCars196(Dataset):
 
         with open(f'{root}/class_names.json', 'wt') as f:
             json.dump(class_idx_to_name, f, indent=4)
-        logging.info('Done', file=sys.stderr)
+        print('Done', file=sys.stderr)
 
     @staticmethod
     def get_class_names():
         if not os.path.exists(base_path() + f'cars196/class_names.json'):
-            logging.info("Class names not found, performing pre-processing...")
+            print("Class names not found, performing pre-processing...")
             class_idx_to_name = load_and_preprocess_cars196(names_only=True)
-            logging.info('Done', file=sys.stderr)
+            print('Done', file=sys.stderr)
         else:
             with open(base_path() + f'cars196/class_names.json', 'rt') as f:
                 class_idx_to_name = json.load(f)

@@ -3,7 +3,6 @@
 # With adjustments and added comments by workingcoder (github username).
 
 import collections
-import logging
 import math
 import re
 from functools import partial
@@ -52,13 +51,13 @@ def load_pretrained_weights(model, model_name, weights_path=None, load_fc=True, 
     else:
         state_dict.pop('_fc.weight')
         state_dict.pop('_fc.bias')
-        ret = model.load_state_dict(state_dict, strict=False)
+        ret = model.load_state_dict(state_dict, strict=False)  # TODO fix _fc is now classifier
         assert set(ret.missing_keys) == set(
             ['_fc.weight', '_fc.bias']), 'Missing keys when loading pretrained weights: {}'.format(ret.missing_keys)
     assert not ret.unexpected_keys, 'Missing keys when loading pretrained weights: {}'.format(ret.unexpected_keys)
 
     if verbose:
-        logging.info('Loaded pretrained weights for {}'.format(model_name))
+        print('Loaded pretrained weights for {}'.format(model_name))
 
 
 _DEFAULT_BLOCKS_ARGS = [
@@ -505,7 +504,7 @@ def get_model_params_tf(model_name, override_params):
     decoder = BlockDecoder()
     blocks_args = decoder.decode(global_params.blocks_args)
 
-    logging.info('EFFNET LOGGING: global_params= %s', global_params)
+    print('EFFNET LOGGING: global_params= %s', global_params)
     return blocks_args, global_params
 
 
@@ -965,6 +964,7 @@ def mammoth_efficientnet(nclasses: int, model_name: str, pretrained=False):
     Returns:
         ResNet network
     """
+    print(model_name)
     if not pretrained:
         return EfficientNet.from_name(model_name=model_name, num_classes=nclasses)
     else:

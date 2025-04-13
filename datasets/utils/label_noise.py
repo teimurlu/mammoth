@@ -14,7 +14,6 @@ The code is based on:
 """
 
 from argparse import Namespace
-import logging
 import numpy as np
 from numpy.testing import assert_array_almost_equal
 import pickle
@@ -59,7 +58,7 @@ def _check_cache(args) -> np.ndarray:
     if os.path.exists(filepath):
         with open(filepath, 'rb') as infile:
             noisy_targets = pickle.load(infile)
-        logging.info('Noisy sym targets loaded from file!')
+        print('Noisy sym targets loaded from file!')
         return noisy_targets
 
     return None
@@ -84,7 +83,7 @@ def _save_cache(args: Namespace, noisy_targets: np.ndarray) -> None:
     with open(filepath, 'wb') as outfile:
         pickle.dump(noisy_targets, outfile)
 
-    logging.info(f'Cached noisy-labels for {args.dataset} with noise-rate {args.noise_rate} and seed {seed}: {filepath}')
+    print(f'Cached noisy-labels for {args.dataset} with noise-rate {args.noise_rate} and seed {seed}: {filepath}')
 
 
 def get_symmetric_noise(targets: np.ndarray, args: Namespace) -> np.ndarray:
@@ -152,7 +151,7 @@ def get_asymmetric_noise(targets: np.ndarray, args: Namespace) -> np.ndarray:
     actual_noise = (noisy_targets != targets).mean()
     assert actual_noise > 0, 'No noise was applied to the targets'
 
-    logging.info(f'Actual noise rate: {actual_noise:.2f}')
+    print(f'Actual noise rate: {actual_noise:.2f}')
 
     _save_cache(args, noisy_targets)
     return noisy_targets

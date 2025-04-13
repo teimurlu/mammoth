@@ -3,9 +3,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-from argparse import Namespace
 from copy import deepcopy
-import logging
 from typing import List, Tuple, TYPE_CHECKING
 
 import numpy as np
@@ -129,45 +127,6 @@ class ReservoirSampling(BaseSampleSelection):
         rand = np.random.randint(0, num_seen_examples + 1)
         if rand < self.buffer_size:
             return rand
-        else:
-            return -1
-
-
-class BalancoirSampling(BaseSampleSelection):
-    def __init__(self, buffer_size: int, device):
-        super().__init__(buffer_size, device)
-        self.unique_map = np.empty((0,), dtype=np.int32)
-
-    def update_unique_map(self, label_in, label_out=None):
-        while len(self.unique_map) <= label_in:
-            self.unique_map = np.concatenate((self.unique_map, np.zeros((len(self.unique_map) * 2 + 1), dtype=np.int32)), axis=0)
-        self.unique_map[label_in] += 1
-        if label_out is not None:
-            self.unique_map[label_out] -= 1
-
-    def __call__(self, num_seen_examples: int, labels: torch.Tensor, proposed_class: int) -> int:
-        """
-        Balancoir sampling algorithm.
-
-        Args:
-            num_seen_examples: the number of seen examples
-            buffer_size: the maximum buffer size
-            labels: the set of buffer labels
-            proposed_class: the class of the current example
-
-        Returns:
-            the target index if the current image is sampled, else -1
-        """
-        if num_seen_examples < self.buffer_size:
-            return num_seen_examples
-
-        rand = np.random.randint(0, num_seen_examples + 1)
-        if rand < self.buffer_size or len(self.unique_map) <= proposed_class or self.unique_map[proposed_class] < np.median(
-                self.unique_map[self.unique_map > 0]):
-            target_class = np.argmax(self.unique_map)
-            # e = rand % self.unique_map.max()
-            idx = np.arange(self.buffer_size)[labels.cpu() == target_class][rand % self.unique_map.max()]
-            return idx
         else:
             return -1
 
@@ -326,13 +285,11 @@ class Buffer:
         Args:
             buffer_size (int): The maximum size of the buffer.
             device (str, optional): The device to store the buffer on. Defaults to "cpu".
-            sample_selection_strategy: The sample selection strategy. Defaults to 'reservoir'. Options: 'reservoir', 'lars', 'labrs', 'abs', 'balancoir'.
+            sample_selection_strategy: The sample selection strategy. Defaults to 'reservoir'. Options: 'reservoir', 'lars', 'labrs', 'abs'.
 
         Note:
             If during the `get_data` the transform is PIL, data will be moved to cpu and then back to the device. This is why the device is set to cpu by default.
         """
-        self._dl_transform = None
-        self._it_index = 0
         self._buffer_size = buffer_size
         self.device = device
         self.num_seen_examples = 0
@@ -340,7 +297,7 @@ class Buffer:
         self.attention_maps = [None] * buffer_size
         self.sample_selection_strategy = sample_selection_strategy
 
-        assert sample_selection_strategy.lower() in ['reservoir', 'lars', 'labrs', 'abs', 'balancoir', 'unlimited'], f"Invalid sample selection strategy: {sample_selection_strategy}"
+        assert sample_selection_strategy.lower() in ['reservoir', 'lars', 'labrs', 'abs', 'unlimited'], f"Invalid sample selection strategy: {sample_selection_strategy}"
 
         if sample_selection_strategy.lower() == 'abs':
             assert 'dataset' in kwargs, "The dataset is required for ABS sample selection"
@@ -352,8 +309,6 @@ class Buffer:
         elif sample_selection_strategy.lower() == 'unlimited':
             self.sample_selection_fn = lambda x: x
             self._buffer_size = 10  # initial buffer size, will be expanded if needed
-        elif sample_selection_strategy.lower() == 'balancoir':
-            self.sample_selection_fn = BalancoirSampling(buffer_size, device)
         else:
             self.sample_selection_fn = ReservoirSampling(buffer_size, device)
 
@@ -441,9 +396,6 @@ class Buffer:
         """
         return [attr_str for attr_str in self.attributes if hasattr(self, attr_str)]
 
-    def is_full(self):
-        return self.num_seen_examples >= self.buffer_size
-
     def add_data(self, examples, labels=None, logits=None, task_labels=None, attention_maps=None, true_labels=None, sample_selection_scores=None):
         """
         Adds the data to the memory buffer according to the reservoir strategy.
@@ -466,8 +418,6 @@ class Buffer:
         for i in range(examples.shape[0]):
             if self.sample_selection_strategy == 'abs' or self.sample_selection_strategy == 'labrs':
                 index = self.sample_selection_fn(self.num_seen_examples, labels=self.labels)
-            elif self.sample_selection_strategy == 'balancoir':
-                index = self.sample_selection_fn(self.num_seen_examples, labels=self.labels, proposed_class=labels[i])
             else:
                 index = self.sample_selection_fn(self.num_seen_examples)
             self.num_seen_examples += 1
@@ -475,8 +425,6 @@ class Buffer:
                 if self.sample_selection_strategy == 'unlimited' and self.num_seen_examples > self._buffer_size:
                     self._buffer_size *= 2
                     self.init_tensors(examples, labels, logits, task_labels, true_labels)
-                if self.sample_selection_strategy == 'balancoir':
-                    self.sample_selection_fn.update_unique_map(labels[i], self.labels[index] if index < self.num_seen_examples else None)
 
                 self.examples[index] = examples[i].to(self.device)
                 if labels is not None:
@@ -493,7 +441,7 @@ class Buffer:
                     self.true_labels[index] = true_labels[i].to(self.device)
 
     def get_data(self, size: int, transform: nn.Module = None, return_index=False, device=None,
-                 mask_task_out=None, cpt=None, return_not_aug=False, not_aug_transform=None, force_indexes=None) -> Tuple:
+                 mask_task_out=None, cpt=None, return_not_aug=False, not_aug_transform=None) -> Tuple:
         """
         Random samples a batch of size items.
 
@@ -505,7 +453,6 @@ class Buffer:
             cpt: the number of classes per task (required if mask_task is not None and task_labels are not present)
             return_not_aug: if True, also returns the not augmented items
             not_aug_transform: the transformation to be applied to the not augmented items (if `return_not_aug` is True)
-            forced_indexes: if not None, forces the selection of the samples with the given indexes
 
         Returns:
             a tuple containing the requested items. If return_index is True, the tuple contains the indexes as first element.
@@ -523,10 +470,7 @@ class Buffer:
         if size > min(num_avail_samples, self.examples.shape[0]):
             size = min(num_avail_samples, self.examples.shape[0])
 
-        if force_indexes is not None:
-            choice = force_indexes if isinstance(force_indexes, np.ndarray) else np.array(force_indexes)
-        else:
-            choice = np.random.choice(num_avail_samples, size=size, replace=False)
+        choice = np.random.choice(num_avail_samples, size=size, replace=False)
         if transform is None:
             def transform(x): return x
 
@@ -550,58 +494,6 @@ class Buffer:
             return ret_tuple
         else:
             return (torch.tensor(choice).to(target_device), ) + ret_tuple
-
-    def get_balanced_data(self, size: int, transform=None, n_classes=-1) -> Tuple:
-        """
-        Random samples a batch of size items only from n_classes, balancing the samples per class.
-
-        Args:
-            size: the number of requested items
-            transform: the transformation to be applied (data augmentation)
-            n_classes: the number of classes to sample from
-
-        Returns:
-            a tuple containing the requested items.
-        """
-        if size > min(self.num_seen_examples, self.examples.shape[0]):
-            size = min(self.num_seen_examples, self.examples.shape[0])
-
-        tot_classes, class_counts = torch.unique(self.labels[:self.num_seen_examples], return_counts=True)
-        if n_classes == -1:
-            n_classes = len(tot_classes)
-
-        finished = False
-        selected = tot_classes
-        while not finished:
-            n_classes = min(n_classes, len(selected))
-            size_per_class = torch.full([n_classes], size // n_classes)
-            size_per_class[:size % n_classes] += 1
-            selected = tot_classes[class_counts >= size_per_class[0]]
-            if n_classes <= len(selected):
-                finished = True
-            if len(selected) == 0:
-                logging.error('No class has enough examples')
-                return self.get_data(size, transform=transform)
-
-        selected = selected[torch.randperm(len(selected))[:n_classes]]
-
-        choice = []
-        for i, id_class in enumerate(selected):
-            choice += np.random.choice(torch.where(self.labels[:self.num_seen_examples] == id_class)[0].cpu(),
-                                       size=size_per_class[i].item(),
-                                       replace=False).tolist()
-        choice = np.array(choice)
-
-        if transform is None:
-            def transform(x): return x
-        # ret_tuple = (torch.stack([transform(ee.cpu()) for ee in self.examples[choice]]).to(self.device),)
-        ret_tuple = (apply_transform(self.examples[choice], transform=transform).to(self.device),)
-        for attr_str in self.attributes[1:]:
-            if hasattr(self, attr_str):
-                attr = getattr(self, attr_str)
-                ret_tuple += (attr[choice],)
-
-        return ret_tuple
 
     def get_data_by_index(self, indexes, transform: nn.Module = None, device=None) -> Tuple:
         """
@@ -664,60 +556,6 @@ class Buffer:
                 delattr(self, attr_str)
         self.num_seen_examples = 0
 
-    def __iter__(self):
-        """
-        Initializes and returns a iterator object for the buffer.
-        """
-        self._it_index = 0
-
-        return self
-
-    def __next__(self):
-        """
-        Returns the next item in the buffer.
-        """
-        if self._it_index >= self.__len__():
-            raise StopIteration
-        return self.__getitem__(self._it_index, transform=self._dl_transform)
-
-    def get_dataloader(self, args: Namespace, batch_size: int, shuffle=False, drop_last=False, transform=None, sampler=None) -> torch.utils.data.DataLoader:
-        """
-        Return a DataLoader for the buffer.
-
-        Args:
-            args: the arguments from the CLI
-            batch_size: the batch size
-            shuffle: if True, shuffle the data
-            drop_last: if True, drop the last incomplete batch
-            transform: the transformation to be applied (data augmentation)
-            sampler: the sampler to be used
-
-        Returns:
-            DataLoader
-        """
-        self._dl_transform = transform
-        self._it_index = 0
-
-        return create_seeded_dataloader(args, self, batch_size=batch_size,
-                                        shuffle=shuffle, drop_last=drop_last,
-                                        sampler=sampler, num_workers=0,
-                                        non_verbose=True)
-
-    def __getitem__(self, index, transform=None):
-        """
-        Returns the item in the buffer at the given index.
-
-        Args:
-            index: the index of the item
-            transform: (optional) a transformation to be applied
-
-        Returns:
-            a tuple containing the requested items. The returned items depend on the attributes stored in the buffer from previous calls to `add_data`.
-        """
-        data = self.get_data(size=1, transform=transform if self._dl_transform is None or transform is not None else self._dl_transform, force_indexes=[index])
-
-        return [d.squeeze(0) for d in data]
-
 
 @torch.no_grad()
 def fill_buffer(buffer: Buffer, dataset: 'ContinualDataset', t_idx: int, net: 'MammothBackbone' = None, use_herding=False,
@@ -759,7 +597,7 @@ def fill_buffer(buffer: Buffer, dataset: 'ContinualDataset', t_idx: int, net: 'M
         samples_per_class = np.ceil(buffer.buffer_size / n_seen_classes).astype(int)
         new_bufsize = int(n_seen_classes * samples_per_class)
         if new_bufsize != buffer.buffer_size:
-            logging.info('Buffer size has bee changed to:', new_bufsize)
+            print('Buffer size has bee changed to:', new_bufsize)
         buffer.buffer_size = new_bufsize
     else:
         samples_per_class = buffer.buffer_size // n_seen_classes

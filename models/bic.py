@@ -3,7 +3,6 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-import logging
 import sys
 from copy import deepcopy
 
@@ -80,7 +79,7 @@ class BiC(ContinualModel):
         if self.current_task > 0:
             self.net.eval()
 
-            logging.info("EVAL PRE", dataset.evaluate(self, dataset))
+            print("EVAL PRE", dataset.evaluate(self, dataset))
 
             self.evaluate_bias('pre')
 
@@ -108,7 +107,7 @@ class BiC(ContinualModel):
                     self.biasopt.step()
 
             self.corr_factors = corr_factors
-            logging.info(self.corr_factors, file=sys.stderr)
+            print(self.corr_factors, file=sys.stderr)
 
             self.evaluate_bias('post')
 

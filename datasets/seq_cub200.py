@@ -1,4 +1,3 @@
-import logging
 import os
 import numpy as np
 import torch
@@ -36,11 +35,11 @@ class MyCUB200(Dataset):
 
         if download:
             if os.path.isdir(root) and len(os.listdir(root)) > 0:
-                logging.info('Download not needed, files already on disk.')
+                print('Download not needed, files already on disk.')
             else:
                 from onedrivedownloader import download
                 ln = '<iframe src="https://onedrive.live.com/embed?cid=D3924A2D106E0039&resid=D3924A2D106E0039%21110&authkey=AIEfi5nlRyY1yaE" width="98" height="120" frameborder="0" scrolling="no"></iframe>'
-                logging.info('Downloading dataset')
+                print('Downloading dataset')
                 download(ln, filename=smart_joint(root, 'cub_200_2011.zip'), unzip=True, unzip_path=root, clean=True)
 
         data_file = np.load(smart_joint(root, 'train_data.npz' if train else 'test_data.npz'), allow_pickle=True)

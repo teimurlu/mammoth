@@ -1,5 +1,4 @@
 import json
-import logging
 import os
 import torchvision.transforms as transforms
 import torch.nn.functional as F
@@ -72,11 +71,11 @@ class CropDisease(Dataset):
 
         if download:
             if os.path.isdir(root) and len(os.listdir(root)) > 0:
-                logging.info('Download not needed, files already on disk.')
+                print('Download not needed, files already on disk.')
             else:
                 from onedrivedownloader import download
                 ln = "https://unimore365-my.sharepoint.com/:u:/g/personal/215580_unimore_it/EZUaXKQUAVBPrhjHTUdflDEBNu0YiPWrdpAdDhnEU4nD2A?e=GPrCYF"
-                logging.info('Downloading dataset')
+                print('Downloading dataset')
                 parent_dir = os.path.dirname(root)
                 download(ln, filename=os.path.join(root, 'cropdisease.tar.gz'), unzip=True, unzip_path=parent_dir, clean=True)
 

@@ -7,9 +7,11 @@
 # # This source code is licensed under the license found in the
 # # LICENSE file in the root directory of this source tree.
 
+# import copy
 # import torch
 # from torch import nn
 # from models.utils.continual_model import ContinualModel
+# import torch.nn.functional as F
 
 
 # class Sgd_Thesis(ContinualModel):
@@ -26,8 +28,18 @@
 #         )
 #         self.active_task = 0
 #         self.clip_value = 1.0
-
 #         self.base_pruning_rate = 0
+
+#         # SAM parameters
+#         self.lmbd = getattr(args, "lmbd", 0.5)
+#         self.beta = getattr(args, "beta", 0.9)
+
+#         self.surrogate_net = copy.deepcopy(backbone)
+#         self.surrogate_net = self.surrogate_net.to(self.device)
+
+#         # Freeze surrogate initially
+#         for param in self.surrogate_net.parameters():
+#             param.requires_grad = False
 
 #     def _get_next_layer_name(self, current_layer_name):
 #         """
@@ -97,7 +109,7 @@
 #             # Handle BatchNorm parameters for the corresponding layer
 #             self._reinitialize_batchnorm_for_neurons(layer_name, current_dead)
 
-#     def reinitialize_reviving_neurons_ghada(
+#     def reinitialize_reviving_neurons_method1(
 #         self, layer_name, current_epoch=None, prev_epoch=None
 #     ):
 #         """
@@ -166,7 +178,7 @@
 #         # Handle BatchNorm parameters for the corresponding layer
 #         self._reinitialize_batchnorm_for_neurons(layer_name, reviving_neurons)
 
-#     def reinitialize_reviving_neurons_ours(
+#     def reinitialize_reviving_neurons_method2(
 #         self, layer_name, current_epoch=None, prev_epoch=None
 #     ):
 #         """
@@ -325,6 +337,30 @@
 #         """
 #         Apply hooks to force zero activations for pruned neurons after each forward pass.
 #         """
+#         # Special handling for conv1 which is a single layer
+#         if layer_name == "conv1":
+#             if not hasattr(self.net, layer_name):
+#                 return
+
+#             layer = getattr(self.net, layer_name)
+
+#             def make_hook(neurons_to_prune):
+#                 def hook(module, input, output):
+#                     for idx in neurons_to_prune:
+#                         if idx < output.size(1):
+#                             output[:, idx] = 0.0
+#                     return output
+
+#                 return hook
+
+#             if hasattr(layer, "_pruning_hook"):
+#                 layer._pruning_hook.remove()
+#             layer._pruning_hook = layer.register_forward_hook(
+#                 make_hook(permanently_dead_neurons)
+#             )
+#             return
+
+#         # Original code for layer1-4
 #         layer_seq = getattr(self.net, layer_name)
 
 #         def make_hook(neurons_to_prune):
@@ -393,6 +429,88 @@
 #         if self.active_task == 0:
 #             return
 
+#         # Special handling for conv1 which is a single Conv2d layer, not a sequence
+#         if layer_name == "conv1":
+#             if not hasattr(self.net, layer_name):
+#                 return
+
+#             result = self.net.find_permanently_dead_neurons(layer_name)
+#             permanently_dead_neurons = result["permanent_dead_neurons"]
+
+#             if not permanently_dead_neurons:
+#                 return
+
+#             current_rate = self.get_current_pruning_rate()
+#             num_to_prune = max(1, int(len(permanently_dead_neurons) * current_rate))
+#             neurons_to_prune = sorted(permanently_dead_neurons)[:num_to_prune]
+
+#             print(
+#                 f"Pruning {len(neurons_to_prune)} neurons (of {len(permanently_dead_neurons)} detected) in {layer_name} at rate {current_rate*100:.1f}%"
+#             )
+
+#             if not hasattr(self, "pruned_neurons_count"):
+#                 self.pruned_neurons_count = {}
+#             self.pruned_neurons_count[layer_name] = self.pruned_neurons_count.get(
+#                 layer_name, 0
+#             ) + len(neurons_to_prune)
+
+#             # Get the conv1 layer directly
+#             conv_layer = getattr(self.net, layer_name)
+
+#             # Add weight mask if it doesn't exist
+#             if not hasattr(conv_layer, "weight_mask"):
+#                 conv_layer.register_buffer(
+#                     "weight_mask", torch.ones_like(conv_layer.weight)
+#                 )
+
+#             weight_mask_size = conv_layer.weight_mask.size(0)
+#             for neuron_idx in neurons_to_prune:
+#                 if neuron_idx < weight_mask_size:
+#                     conv_layer.weight_mask[neuron_idx] = 0.0
+#                     conv_layer.weight.data[neuron_idx] = 0.0
+#                 else:
+#                     print(
+#                         f"Warning: Neuron index {neuron_idx} out of bounds (max: {weight_mask_size-1})"
+#                     )
+
+#             # Handle bias if it exists
+#             if hasattr(conv_layer, "bias") and conv_layer.bias is not None:
+#                 if not hasattr(conv_layer, "bias_mask"):
+#                     conv_layer.register_buffer(
+#                         "bias_mask", torch.ones_like(conv_layer.bias)
+#                     )
+#                 bias_mask_size = conv_layer.bias_mask.size(0)
+#                 for neuron_idx in neurons_to_prune:
+#                     if neuron_idx < bias_mask_size:
+#                         conv_layer.bias_mask[neuron_idx] = 0.0
+#                         conv_layer.bias.data[neuron_idx] = 0.0
+#                     else:
+#                         print(
+#                             f"Warning: Neuron index {neuron_idx} out of bounds for bias (max: {bias_mask_size-1})"
+#                         )
+
+#             # Handle applying hooks for conv1
+#             def make_hook(neurons_to_prune):
+#                 def hook(module, input, output):
+#                     for idx in neurons_to_prune:
+#                         if idx < output.size(1):
+#                             output[:, idx] = 0.0
+#                     return output
+
+#                 return hook
+
+#             if hasattr(conv_layer, "_pruning_hook"):
+#                 conv_layer._pruning_hook.remove()
+#             conv_layer._pruning_hook = conv_layer.register_forward_hook(
+#                 make_hook(neurons_to_prune)
+#             )
+
+#             # Test effectiveness
+#             self._test_pruning_effectiveness(layer_name, neurons_to_prune)
+
+#             return
+
+#         # Original code for layer1-4 which are sequences of blocks
 #         layer_seq = getattr(self.net, layer_name)
 #         result = self.net.find_permanently_dead_neurons(layer_name)
 #         permanently_dead_neurons = result["permanent_dead_neurons"]
@@ -700,12 +818,20 @@
 
 #     def _transfer_weights(self, old_net, new_net, pruning_config):
 #         """
-#         Transfer weights from old network to new pruned network.
-#         The conv2 weight transfer is optimized with batched indexing.
+#         Transfer weights from old network to new pruned network,
+#         including BatchNorm parameters.
 #         """
+#         # Transfer conv1 weights and bn1 parameters
 #         new_net.conv1.weight.data = old_net.conv1.weight.data.clone()
 #         if old_net.conv1.bias is not None:
 #             new_net.conv1.bias.data = old_net.conv1.bias.data.clone()
+
+#         # Transfer bn1 parameters
+#         if hasattr(old_net, "bn1") and hasattr(new_net, "bn1"):
+#             new_net.bn1.weight.data = old_net.bn1.weight.data.clone()
+#             new_net.bn1.bias.data = old_net.bn1.bias.data.clone()
+#             new_net.bn1.running_mean.data = old_net.bn1.running_mean.data.clone()
+#             new_net.bn1.running_var.data = old_net.bn1.running_var.data.clone()
 
 #         prev_out_dim = new_net.conv1.weight.size(0)
 #         for layer_name in ["layer1", "layer2", "layer3", "layer4"]:
@@ -713,9 +839,11 @@
 #                 continue
 
 #             if layer_name not in pruning_config:
+#                 # For layers without pruning, transfer all weights directly
 #                 old_layer = getattr(old_net, layer_name)
 #                 new_layer = getattr(new_net, layer_name)
 #                 for old_block, new_block in zip(old_layer, new_layer):
+#                     # Transfer conv1 weights and bn1 parameters
 #                     if hasattr(old_block, "conv1"):
 #                         new_block.conv1.weight.data = (
 #                             old_block.conv1.weight.data.clone()
@@ -727,6 +855,18 @@
 #                             new_block.conv1.bias.data = (
 #                                 old_block.conv1.bias.data.clone()
 #                             )
+
+#                         # Transfer bn1 parameters
+#                         new_block.bn1.weight.data = old_block.bn1.weight.data.clone()
+#                         new_block.bn1.bias.data = old_block.bn1.bias.data.clone()
+#                         new_block.bn1.running_mean.data = (
+#                             old_block.bn1.running_mean.data.clone()
+#                         )
+#                         new_block.bn1.running_var.data = (
+#                             old_block.bn1.running_var.data.clone()
+#                         )
+
+#                     # Transfer conv2 weights and bn2 parameters
 #                     if hasattr(old_block, "conv2"):
 #                         new_block.conv2.weight.data = (
 #                             old_block.conv2.weight.data.clone()
@@ -738,16 +878,48 @@
 #                             new_block.conv2.bias.data = (
 #                                 old_block.conv2.bias.data.clone()
 #                             )
+
+#                         # Transfer bn2 parameters
+#                         new_block.bn2.weight.data = old_block.bn2.weight.data.clone()
+#                         new_block.bn2.bias.data = old_block.bn2.bias.data.clone()
+#                         new_block.bn2.running_mean.data = (
+#                             old_block.bn2.running_mean.data.clone()
+#                         )
+#                         new_block.bn2.running_var.data = (
+#                             old_block.bn2.running_var.data.clone()
+#                         )
+
+#                     # Transfer shortcut weights if it exists
+#                     if len(old_block.shortcut) > 0 and len(new_block.shortcut) > 0:
+#                         for i, (old_module, new_module) in enumerate(
+#                             zip(old_block.shortcut, new_block.shortcut)
+#                         ):
+#                             if isinstance(old_module, nn.Conv2d):
+#                                 new_module.weight.data = old_module.weight.data.clone()
+#                             elif isinstance(old_module, nn.BatchNorm2d):
+#                                 new_module.weight.data = old_module.weight.data.clone()
+#                                 new_module.bias.data = old_module.bias.data.clone()
+#                                 new_module.running_mean.data = (
+#                                     old_module.running_mean.data.clone()
+#                                 )
+#                                 new_module.running_var.data = (
+#                                     old_module.running_var.data.clone()
+#                                 )
+
 #                 prev_out_dim = getattr(new_net, layer_name)[0].conv1.weight.size(0)
 #             else:
+#                 # For pruned layers, transfer weights selectively
 #                 old_layer = getattr(old_net, layer_name)
 #                 new_layer = getattr(new_net, layer_name)
 #                 keep_indices = pruning_config[layer_name]["keep_indices"]
 #                 keep_tensor = torch.tensor(
 #                     keep_indices, device=old_net.conv1.weight.device
 #                 )
+
 #                 for old_block, new_block in zip(old_layer, new_layer):
+#                     # Transfer conv1 weights and bn1 parameters
 #                     if hasattr(old_block, "conv1"):
+#                         # Transfer pruned conv1 weights
 #                         new_block.conv1.weight.data = (
 #                             old_block.conv1.weight.data.index_select(
 #                                 0, keep_tensor
@@ -762,12 +934,36 @@
 #                                     0, keep_tensor
 #                                 ).clone()
 #                             )
+
+#                         # Transfer pruned bn1 parameters
+#                         new_block.bn1.weight.data = (
+#                             old_block.bn1.weight.data.index_select(
+#                                 0, keep_tensor
+#                             ).clone()
+#                         )
+#                         new_block.bn1.bias.data = old_block.bn1.bias.data.index_select(
+#                             0, keep_tensor
+#                         ).clone()
+#                         new_block.bn1.running_mean.data = (
+#                             old_block.bn1.running_mean.data.index_select(
+#                                 0, keep_tensor
+#                             ).clone()
+#                         )
+#                         new_block.bn1.running_var.data = (
+#                             old_block.bn1.running_var.data.index_select(
+#                                 0, keep_tensor
+#                             ).clone()
+#                         )
+
+#                     # Transfer conv2 weights and bn2 parameters
 #                     if hasattr(old_block, "conv2"):
+#                         # Transfer pruned conv2 weights (both input and output channels)
 #                         conv2_weight = old_block.conv2.weight.data.index_select(
 #                             0, keep_tensor
 #                         )
 #                         conv2_weight = conv2_weight.index_select(1, keep_tensor)
 #                         new_block.conv2.weight.data = conv2_weight.clone()
+
 #                         if (
 #                             hasattr(old_block.conv2, "bias")
 #                             and old_block.conv2.bias is not None
@@ -777,8 +973,73 @@
 #                                     0, keep_tensor
 #                                 ).clone()
 #                             )
+
+#                         # Transfer pruned bn2 parameters
+#                         new_block.bn2.weight.data = (
+#                             old_block.bn2.weight.data.index_select(
+#                                 0, keep_tensor
+#                             ).clone()
+#                         )
+#                         new_block.bn2.bias.data = old_block.bn2.bias.data.index_select(
+#                             0, keep_tensor
+#                         ).clone()
+#                         new_block.bn2.running_mean.data = (
+#                             old_block.bn2.running_mean.data.index_select(
+#                                 0, keep_tensor
+#                             ).clone()
+#                         )
+#                         new_block.bn2.running_var.data = (
+#                             old_block.bn2.running_var.data.index_select(
+#                                 0, keep_tensor
+#                             ).clone()
+#                         )
+
+#                     # Transfer shortcut weights if it exists
+#                     if len(old_block.shortcut) > 0 and len(new_block.shortcut) > 0:
+#                         for i, (old_module, new_module) in enumerate(
+#                             zip(old_block.shortcut, new_block.shortcut)
+#                         ):
+#                             if isinstance(old_module, nn.Conv2d) and isinstance(
+#                                 new_module, nn.Conv2d
+#                             ):
+#                                 # For conv in shortcut, we need to keep output channels
+#                                 shortcut_weight = old_module.weight.data.index_select(
+#                                     0, keep_tensor
+#                                 )
+#                                 min_in_channels = min(
+#                                     shortcut_weight.size(1), new_module.weight.size(1)
+#                                 )
+#                                 new_module.weight.data[:, :min_in_channels] = (
+#                                     shortcut_weight[:, :min_in_channels]
+#                                 )
+#                             elif isinstance(old_module, nn.BatchNorm2d) and isinstance(
+#                                 new_module, nn.BatchNorm2d
+#                             ):
+#                                 # For BN in shortcut, transfer pruned parameters
+#                                 new_module.weight.data = (
+#                                     old_module.weight.data.index_select(
+#                                         0, keep_tensor
+#                                     ).clone()
+#                                 )
+#                                 new_module.bias.data = (
+#                                     old_module.bias.data.index_select(
+#                                         0, keep_tensor
+#                                     ).clone()
+#                                 )
+#                                 new_module.running_mean.data = (
+#                                     old_module.running_mean.data.index_select(
+#                                         0, keep_tensor
+#                                     ).clone()
+#                                 )
+#                                 new_module.running_var.data = (
+#                                     old_module.running_var.data.index_select(
+#                                         0, keep_tensor
+#                                     ).clone()
+#                                 )
+
 #                 prev_out_dim = getattr(new_net, layer_name)[0].conv1.weight.size(0)
 
+#         # Transfer classifier weights
 #         final_feature_dim = prev_out_dim
 #         new_classifier = nn.Linear(
 #             final_feature_dim, new_net.classifier.out_features
@@ -790,7 +1051,7 @@
 #         new_classifier.bias.data = old_net.classifier.bias.data.clone()
 #         new_net.classifier = new_classifier
 
-#         print("\n✓ Weight transfer complete.")
+#         print("\n✓ Weight transfer complete (including BatchNorm parameters).")
 #         return new_net
 
 #     def update_classifier_after_pruning(self, new_net):
@@ -1222,55 +1483,80 @@
 #         # self.net.check_inactive_neurons()
 #         for layer_name in ["conv1", "layer1", "layer2", "layer3", "layer4"]:
 #             self.net.analyze_layer_activations(
-#                 layer_name, self.active_task, epoch, dead_threshold=0.1, top_k=10
+#                 layer_name, self.active_task, epoch, dead_threshold=0.2, top_k=10
 #             )
-#             # if epoch % 2 == 0:
-#             # self.net.prune_dead_neurons(layer_name)
-#             self.reinitialize_reviving_neurons_ours(layer_name, epoch, epoch - 1)
-#             # self.reinitialize_currently_dead_neurons(layer_name, epoch)
+
+#             # if epoch > 0:
+#             # self.reinitialize_reviving_neurons_ghada(layer_name, epoch, epoch - 1)
 
 #     def end_task(self, dataset):
 #         """
 #         At the end of each task, prune neurons gradually and then rebuild the network.
 #         """
+#         # self.net.check_inactive_neurons(threshold=0.2)
 #         print(f"\n=== End of Task {self.active_task} Analysis ===")
+#         # if self.active_task > 0:
+#         # Prune neurons gradually for each layer
+#         for layer_name in ["conv1", "layer1", "layer2", "layer3", "layer4"]:
+#             if layer_name in self.net.dead_neuron_history:
+#                 self.net.analyze_dead_neuron_consistency(layer_name)
+#                 # self.reinitialize_reviving_neurons(layer_name)
+
+#                 # if self.active_task % 2:
+#                 #     self.prune_dead_neurons(layer_name)
+#         # self.net.save_dead_neuron_data("layer4")
+
 #         if self.active_task > 0:
-#             # Prune neurons gradually for each layer
-#             for layer_name in ["conv1", "layer1", "layer2", "layer3", "layer4"]:
-#                 if layer_name in self.net.dead_neuron_history:
-#                     self.net.analyze_dead_neuron_consistency(layer_name)
-#                     # self.reinitialize_reviving_neurons(layer_name)
+#             self.update_surrogate()
 
-#                     # if self.active_task % 2:
-#                     # self.prune_dead_neurons(layer_name)
+#         if hasattr(self, "pruned_neurons_count") and self.pruned_neurons_count:
+#             self.surrogate_net = copy.deepcopy(self.net)
 
-#             # total_pruned = (
-#             #     sum(self.pruned_neurons_count.values())
-#             #     if hasattr(self, "pruned_neurons_count")
-#             #     else 0
-#             # )
-#             # if total_pruned > 0:
-#             #     self.verify_pruning_effectiveness()
-#             #     self.rebuild_network_with_pruning()
-#             # self.fix_dimension_mismatches(debug=False)
+#         # total_pruned = (
+#         #     sum(self.pruned_neurons_count.values())
+#         #     if hasattr(self, "pruned_neurons_count")
+#         #     else 0
+#         # )
+#         # if total_pruned > 0:
+#         #     self.verify_pruning_effectiveness()
+#         #     self.rebuild_network_with_pruning()
+#         # self.fix_dimension_mismatches(debug=False)
 #         self.active_task += 1
 
-#     #     if self.active_task > 0:
-#     #         for layer_name in ["conv1", "layer1", "layer2", "layer3", "layer4"]:
-#     #             if layer_name in self.net.dead_neuron_history:
-#     #                 self.reinitialize_reviving_neurons_ghada(layer_name)
+#     # def begin_task(self, dataset):
+#     # if self.active_task > 0:
+#     #     for layer_name in ["conv1", "layer1", "layer2", "layer3", "layer4"]:
+#     #         if layer_name in self.net.dead_neuron_history:
+#     #             self.reinitialize_reviving_neurons_method1(layer_name)
 
-#     #                 self.prune_dead_neurons(layer_name)
+#     #             self.prune_dead_neurons(layer_name)
 
-#     #         total_pruned = (
-#     #             sum(self.pruned_neurons_count.values())
-#     #             if hasattr(self, "pruned_neurons_count")
-#     #             else 0
-#     #         )
-#     #         if total_pruned > 0:
-#     #             self.verify_pruning_effectiveness()
-#     #             self.rebuild_network_with_pruning()
-#     #         self.fix_dimension_mismatches(debug=False)
+#     #     total_pruned = (
+#     #         sum(self.pruned_neurons_count.values())
+#     #         if hasattr(self, "pruned_neurons_count")
+#     #         else 0
+#     #     )
+#     #     if total_pruned > 0:
+#     #         self.verify_pruning_effectiveness()
+#     #         self.rebuild_network_with_pruning()
+#     #     self.fix_dimension_mismatches(debug=False)
+
+#     def sam_loss(self):
+#         """Calculate regularization loss between main model and surrogate"""
+#         reg_loss = 0
+#         for (name, param), (s_name, s_param) in zip(
+#             self.net.named_parameters(), self.surrogate_net.named_parameters()
+#         ):
+#             reg_loss += F.mse_loss(param, s_param)
+#         return self.lmbd * reg_loss
+
+#     def update_surrogate(self):
+#         """Update surrogate with weighted average of current and past parameters"""
+#         with torch.no_grad():
+#             for param, s_param in zip(
+#                 self.net.parameters(), self.surrogate_net.parameters()
+#             ):
+#                 s_param.data = self.beta * param.data + (1 - self.beta) * s_param.data
 
 #     def observe(self, inputs, labels, not_aug_inputs, epoch=None, **kwargs):
 #         """
@@ -1278,11 +1564,29 @@
 #         """
 #         if hasattr(self, "pruned_neurons_count") and self.pruned_neurons_count:
 #             self.fix_dimension_mismatches(debug=False)
+
 #         self.opt.zero_grad()
 #         outputs = self.net(inputs)
 #         loss = self.loss(outputs, labels)
+
+#         if self.active_task > 0:
+#             reg_loss = self.sam_loss()
+#             loss += reg_loss
+
 #         loss.backward()
-#         # Optionally, you can clip gradients here:
+
 #         # torch.nn.utils.clip_grad_norm_(self.net.parameters(), self.clip_value)
+
 #         self.opt.step()
 #         return loss.item()
+
+#     @staticmethod
+#     def get_parser(parser):
+#         parser.add_argument(
+#             "--lmbd", type=float, default=0.5, help="SAM regularization strength"
+#         )
+#         parser.add_argument(
+#             "--beta", type=float, default=0.9, help="SAM surrogate update momentum"
+#         )
+#         return parser
+# #
