@@ -52,61 +52,6 @@ class Sgd_Thesis(ContinualModel):
             pass
         return None
 
-    def reinitialize_currently_dead_neurons(self, layer_name, epoch):
-        if layer_name not in self.net.dead_neuron_history:
-            return []
-
-        if epoch is not None and epoch - 1 is not None and self.active_task > 0:
-            # Get currently dead neurons for this specific epoch
-            current_dead = set()
-            for neuron_idx, history in self.net.dead_neuron_history[layer_name].items():
-                if self.active_task in history and epoch in history[self.active_task]:
-                    current_dead.add(neuron_idx)
-
-            if not current_dead:
-                return
-
-            print(
-                f"Currently dead neurons in {layer_name} at epoch {epoch}: {current_dead}"
-            )
-            print(
-                f"Re-initializing {len(current_dead)} currently dead neurons in {layer_name}"
-            )
-
-            layer = getattr(self.net, layer_name)
-
-            # Handle convolutional layers and their weights
-            if hasattr(layer, "weight"):
-                # For convolutional layers
-                if len(layer.weight.shape) == 4:
-                    for neuron_idx in current_dead:
-                        layer.weight.data[neuron_idx] = 0.0
-                        # Custom handling for incoming weights can be added here.
-                # For fully connected layers
-                elif len(layer.weight.shape) == 2:
-                    for neuron_idx in current_dead:
-                        layer.weight.data[neuron_idx] = 0.0
-                        next_layer_name = self._get_next_layer_name(layer_name)
-                        if next_layer_name:
-                            next_layer = getattr(self.net, next_layer_name)
-                            if (
-                                hasattr(next_layer, "weight")
-                                and len(next_layer.weight.shape) == 2
-                            ):
-                                torch.nn.init.kaiming_normal_(
-                                    next_layer.weight[:, neuron_idx : neuron_idx + 1],
-                                    mode="fan_in",
-                                    nonlinearity="relu",
-                                )
-
-            # Handle bias parameters if they exist
-            if hasattr(layer, "bias") and layer.bias is not None:
-                for neuron_idx in current_dead:
-                    layer.bias.data[neuron_idx] = 0
-
-            # Handle BatchNorm parameters for the corresponding layer
-            self._reinitialize_batchnorm_for_neurons(layer_name, current_dead)
-
     def reinitialize_reviving_neurons_method1(
         self, layer_name, current_epoch=None, prev_epoch=None
     ):
@@ -1354,11 +1299,11 @@ class Sgd_Thesis(ContinualModel):
         # self.net.check_inactive_neurons(show_histogram=True)
         for layer_name in ["conv1", "layer1", "layer2", "layer3", "layer4"]:
             self.net.analyze_layer_activations(
-                layer_name, self.active_task, epoch, dead_threshold=0.05, top_k=10
+                layer_name, self.active_task, epoch, dead_threshold=0.1, top_k=10
             )
 
-            if epoch > 0:
-                self.reinitialize_reviving_neurons_method2(layer_name, epoch, epoch - 1)
+            # if epoch > 0:
+            #     self.reinitialize_reviving_neurons_method2(layer_name, epoch, epoch - 1)
 
     def end_task(self, dataset):
         """
@@ -1393,18 +1338,20 @@ class Sgd_Thesis(ContinualModel):
             for layer_name in ["conv1", "layer1", "layer2", "layer3", "layer4"]:
                 if layer_name in self.net.dead_neuron_history:
                     # self.reinitialize_reviving_neurons_method2(layer_name)
+                    self.net.find_persistently_dead_neurons(
+                        active_task=self.active_task, layer_name=layer_name
+                    )
+                    # self.prune_dead_neurons(layer_name)
 
-                    self.prune_dead_neurons(layer_name)
-
-            total_pruned = (
-                sum(self.pruned_neurons_count.values())
-                if hasattr(self, "pruned_neurons_count")
-                else 0
-            )
-            if total_pruned > 0:
-                self.verify_pruning_effectiveness()
-                self.rebuild_network_with_pruning()
-            self.fix_dimension_mismatches(debug=False)
+            # total_pruned = (
+            #     sum(self.pruned_neurons_count.values())
+            #     if hasattr(self, "pruned_neurons_count")
+            #     else 0
+            # )
+            # if total_pruned > 0:
+            #     self.verify_pruning_effectiveness()
+            #     self.rebuild_network_with_pruning()
+            # self.fix_dimension_mismatches(debug=False)
 
     def observe_sam(self, inputs, labels, not_aug_inputs, epoch=None, **kwargs):
         """

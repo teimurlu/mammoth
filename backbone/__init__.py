@@ -135,6 +135,75 @@ class MammothBackbone(nn.Module):
                         epoch
                     )
 
+    def find_persistently_dead_neurons(self, active_task, layer_name, n_epochs=3):
+        """
+        Identifies neurons that have been consistently dead for the last n_epochs
+        across all previous tasks (not just a fixed window).
+
+        Args:
+            active_task (int): The current task ID
+            layer_name (str): Name of the layer to analyze
+            n_epochs (int): Minimum number of consecutive epochs a neuron must be dead in each task
+
+        Returns:
+            list: Indices of neurons that have been consistently dead across all previous tasks
+        """
+        if layer_name not in self.dead_neuron_history or active_task <= 0:
+            print(f"Current task: {active_task}, need at least one previous task.")
+            return []
+
+        # Get all neurons in this layer
+        all_neurons = set(self.dead_neuron_history[layer_name].keys())
+
+        # Check all previous tasks
+        tasks_to_check = list(range(0, active_task))
+
+        persistently_dead_neurons = []
+
+        for neuron_idx in all_neurons:
+            history = self.dead_neuron_history[layer_name].get(neuron_idx, {})
+            is_persistently_dead = True
+
+            for task_id in tasks_to_check:
+                if task_id not in history:
+                    is_persistently_dead = False
+                    break
+
+                # Get epochs for this task
+                epochs = sorted(history[task_id])
+                if not epochs:
+                    is_persistently_dead = False
+                    break
+
+                # Check if the neuron was dead for at least n_epochs consecutive epochs
+                max_consecutive = 0
+                current_consecutive = 1
+
+                for i in range(1, len(epochs)):
+                    if epochs[i] == epochs[i - 1] + 1:
+                        current_consecutive += 1
+                    else:
+                        max_consecutive = max(max_consecutive, current_consecutive)
+                        current_consecutive = 1
+
+                max_consecutive = max(max_consecutive, current_consecutive)
+
+                if max_consecutive < n_epochs:
+                    is_persistently_dead = False
+                    break
+
+            if is_persistently_dead:
+                persistently_dead_neurons.append(neuron_idx)
+
+        print(
+            f"\nPersistently Dead Neurons in {layer_name} (across all {len(tasks_to_check)} previous tasks for {n_epochs} epochs each):"
+        )
+        print(f"Found {len(persistently_dead_neurons)} persistently dead neurons")
+        if persistently_dead_neurons:
+            print(f"Indices: {persistently_dead_neurons}")
+
+        return persistently_dead_neurons
+
     def find_permanently_dead_neurons(self, layer_name):
         """
         Identifies neurons that die and remain dead throughout the training process.
