@@ -111,6 +111,202 @@ class MammothBackbone(nn.Module):
         """
         raise NotImplementedError
 
+    def save_combined_neuron_analysis(
+        self, active_task, output_path="results/new_neuron_analysis", create_new=False
+    ):
+        """
+        Save comprehensive neuron analysis data to CSV files, combining all layers.
+        This function appends to existing files if they exist, or creates new ones otherwise.
+
+        Args:
+            active_task (int): Current task ID
+            output_path (str): Directory to save the CSV files
+            create_new (bool): Force creation of new files even if they exist
+
+        Returns:
+            tuple: Paths to the CSV files (dead_neurons_file, reviving_neurons_file)
+        """
+        # Create output directory if it doesn't exist
+        if not os.path.exists(output_path):
+            os.makedirs(output_path)
+
+        # Fixed filenames without timestamp for consistent appending
+        dead_neurons_file = os.path.join(output_path, f"all_layers_dead_neurons.csv")
+        reviving_neurons_file = os.path.join(
+            output_path, f"all_layers_reviving_neurons.csv"
+        )
+
+        # Check if files already exist
+        dead_neurons_exists = os.path.exists(dead_neurons_file) and not create_new
+        reviving_neurons_exists = (
+            os.path.exists(reviving_neurons_file) and not create_new
+        )
+
+        # 1. Combined dead neurons data across all layers
+        all_dead_neurons_data = []
+
+        # 2. Combined reviving neurons data across all layers
+        all_reviving_neurons_data = []
+
+        # Analyze each layer with history
+        for layer_name in self.dead_neuron_history.keys():
+            print(f"Analyzing layer: {layer_name}")
+
+            # Get persistently dead neurons
+            consecutive_data = self.find_persistently_dead_neurons_accross_tasks(
+                active_task, layer_name, n_tasks=2, n_epochs=5
+            )
+
+            if consecutive_data and "consecutively_dead_neurons" in consecutive_data:
+                for neuron_idx in consecutive_data["consecutively_dead_neurons"]:
+                    # Get neuron history
+                    history = self.dead_neuron_history[layer_name][neuron_idx]
+                    first_task = min(history.keys())
+                    first_epoch = min(history[first_task])
+                    last_task = max(history.keys())
+                    last_epoch = max(history[last_task])
+                    task_count = len(history.keys())
+                    epoch_count = sum(len(epochs) for epochs in history.values())
+
+                    # Get consecutive tasks data
+                    longest_streak = 0
+                    streak_start = None
+                    streak_end = None
+
+                    # Check if this neuron has consecutive death info
+                    if neuron_idx in consecutive_data.get("death_info", {}):
+                        info = consecutive_data["death_info"][neuron_idx]
+                        longest_streak = info["consecutive_tasks"]
+                        streak_start = info["longest_streak_start"]
+                        streak_end = streak_start + longest_streak - 1
+
+                    still_dead = active_task - 1 in history
+
+                    # Add to combined data
+                    all_dead_neurons_data.append(
+                        {
+                            "task": active_task,  # Add current task for tracking when this data was collected
+                            "layer_name": layer_name,
+                            "neuron_id": neuron_idx,
+                            "first_death_task": first_task,
+                            "first_death_epoch": first_epoch,
+                            "last_death_task": last_task,
+                            "last_death_epoch": last_epoch,
+                            "task_count": task_count,
+                            "epoch_count": epoch_count,
+                            "longest_streak": longest_streak if longest_streak else 0,
+                            "streak_start": (
+                                streak_start if streak_start is not None else -1
+                            ),
+                            "streak_end": streak_end if streak_end is not None else -1,
+                            "still_dead": "Yes" if still_dead else "No",
+                        }
+                    )
+
+            # Get persistently reviving neurons
+            reviving_result = self.find_persistently_reviving_neurons(
+                active_task, layer_name, n_epochs=5, min_revive_ratio=0.3
+            )
+
+            # Process reviving neurons - no need to call the function twice
+            if isinstance(reviving_result, dict) and reviving_result.get(
+                "persistently_reviving_neurons"
+            ):
+                persistently_reviving = reviving_result["persistently_reviving_neurons"]
+
+                for neuron_idx in persistently_reviving:
+                    # Get stats from the result dictionary
+                    reviving_ratio = reviving_result["reviving_ratios"].get(
+                        neuron_idx, 0
+                    )
+                    revive_count = reviving_result["revive_counts"].get(neuron_idx, 0)
+                    death_count = reviving_result["death_counts"].get(neuron_idx, 0)
+
+                    # Get first death
+                    history = self.dead_neuron_history[layer_name][neuron_idx]
+                    first_task = min(history.keys())
+                    first_epoch = min(history[first_task])
+
+                    all_reviving_neurons_data.append(
+                        {
+                            "task": active_task,  # Add current task for tracking when this data was collected
+                            "layer_name": layer_name,
+                            "neuron_id": neuron_idx,
+                            "first_death_task": first_task,
+                            "first_death_epoch": first_epoch,
+                            "reviving_ratio": float(reviving_ratio),
+                            "revive_count": int(revive_count),
+                            "death_count": int(death_count),
+                            "optimizer": self.optimizer_name,
+                            "learning_rate": self.learning_rate,
+                        }
+                    )
+
+        # Save or append combined dead neurons data
+        if all_dead_neurons_data:
+            # Define fieldnames for dead neurons CSV
+            dead_fieldnames = [
+                "task",
+                "layer_name",
+                "neuron_id",
+                "first_death_task",
+                "first_death_epoch",
+                "last_death_task",
+                "last_death_epoch",
+                "task_count",
+                "epoch_count",
+                "longest_streak",
+                "streak_start",
+                "streak_end",
+                "still_dead",
+            ]
+
+            # Append to existing file or create new one
+            with open(
+                dead_neurons_file, "a" if dead_neurons_exists else "w", newline=""
+            ) as f:
+                writer = csv.DictWriter(f, fieldnames=dead_fieldnames)
+                if not dead_neurons_exists:
+                    writer.writeheader()
+                writer.writerows(all_dead_neurons_data)
+
+            print(
+                f"{'Appended to' if dead_neurons_exists else 'Created'} dead neuron data file: {dead_neurons_file}"
+            )
+
+        # Save or append combined reviving neurons data
+        if all_reviving_neurons_data:
+            # Define fieldnames for reviving neurons CSV
+            reviving_fieldnames = [
+                "task",
+                "layer_name",
+                "neuron_id",
+                "first_death_task",
+                "first_death_epoch",
+                "reviving_ratio",
+                "revive_count",
+                "death_count",
+                "optimizer",
+                "learning_rate",
+            ]
+
+            # Append to existing file or create new one
+            with open(
+                reviving_neurons_file,
+                "a" if reviving_neurons_exists else "w",
+                newline="",
+            ) as f:
+                writer = csv.DictWriter(f, fieldnames=reviving_fieldnames)
+                if not reviving_neurons_exists:
+                    writer.writeheader()
+                writer.writerows(all_reviving_neurons_data)
+
+            print(
+                f"{'Appended to' if reviving_neurons_exists else 'Created'} reviving neuron data file: {reviving_neurons_file}"
+            )
+
+        return (dead_neurons_file, reviving_neurons_file)
+
     def track_dead_neurons(self, layer_name, dead_neurons, task_id, epoch):
         """
         Track dead neurons across tasks and epochs.
@@ -135,18 +331,18 @@ class MammothBackbone(nn.Module):
                         epoch
                     )
 
-    def find_persistently_dead_neurons(self, active_task, layer_name, n_epochs=3):
+    def find_persistently_dead_neurons(self, active_task, layer_name, n_epochs=10):
         """
         Identifies neurons that have been consistently dead for the last n_epochs
-        across all previous tasks (not just a fixed window).
+        consecutive epochs in all previous tasks.
 
         Args:
             active_task (int): The current task ID
             layer_name (str): Name of the layer to analyze
-            n_epochs (int): Minimum number of consecutive epochs a neuron must be dead in each task
+            n_epochs (int): Number of consecutive epochs at the end of each task to check
 
         Returns:
-            list: Indices of neurons that have been consistently dead across all previous tasks
+            list: Indices of neurons that have been consistently dead in the final epochs across all previous tasks
         """
         if layer_name not in self.dead_neuron_history or active_task <= 0:
             print(f"Current task: {active_task}, need at least one previous task.")
@@ -175,34 +371,168 @@ class MammothBackbone(nn.Module):
                     is_persistently_dead = False
                     break
 
-                # Check if the neuron was dead for at least n_epochs consecutive epochs
-                max_consecutive = 0
-                current_consecutive = 1
+                # Find the maximum epoch for this task
+                max_epoch = epochs[-1]
 
-                for i in range(1, len(epochs)):
-                    if epochs[i] == epochs[i - 1] + 1:
-                        current_consecutive += 1
-                    else:
-                        max_consecutive = max(max_consecutive, current_consecutive)
-                        current_consecutive = 1
+                # Check if the last n_epochs are present
+                required_epochs = list(range(max_epoch - n_epochs + 1, max_epoch + 1))
 
-                max_consecutive = max(max_consecutive, current_consecutive)
+                # Verify neuron was dead in the last n consecutive epochs
+                for req_epoch in required_epochs:
+                    if req_epoch not in epochs:
+                        is_persistently_dead = False
+                        break
 
-                if max_consecutive < n_epochs:
-                    is_persistently_dead = False
+                # If this task failed the check, no need to continue
+                if not is_persistently_dead:
                     break
 
             if is_persistently_dead:
                 persistently_dead_neurons.append(neuron_idx)
 
         print(
-            f"\nPersistently Dead Neurons in {layer_name} (across all {len(tasks_to_check)} previous tasks for {n_epochs} epochs each):"
+            f"\nPersistently Dead Neurons in {layer_name} (across all {len(tasks_to_check)} previous tasks for final {n_epochs} epochs each):"
         )
         print(f"Found {len(persistently_dead_neurons)} persistently dead neurons")
         if persistently_dead_neurons:
             print(f"Indices: {persistently_dead_neurons}")
 
         return persistently_dead_neurons
+
+    def find_persistently_dead_neurons_accross_tasks(
+        self, active_task, layer_name, n_tasks=2, n_epochs=5
+    ):
+        """
+        Identifies neurons that have been consistently dead for at least n_tasks consecutive tasks
+        starting from when they first died, checking the final n_epochs of each task.
+
+        Args:
+            active_task (int): The current task ID
+            layer_name (str): Name of the layer to analyze
+            n_tasks (int): Minimum number of consecutive tasks required to be dead
+            n_epochs (int): Number of consecutive epochs at the end of each task to check
+        Returns:
+            dict: Dictionary with consecutively dead neurons and their death information
+        """
+        if layer_name not in self.dead_neuron_history:
+            print(f"No dead neuron history for layer {layer_name}")
+            return {"consecutively_dead_neurons": [], "death_info": {}}
+
+        # Get all neurons in this layer
+        all_neurons = set(self.dead_neuron_history[layer_name].keys())
+
+        consecutively_dead = []
+        death_info = {}
+
+        for neuron_idx in all_neurons:
+            history = self.dead_neuron_history[layer_name].get(neuron_idx, {})
+            if not history:
+                continue
+
+            # Find first task where neuron died
+            first_task = min(history.keys())
+
+            # Count consecutive tasks where neuron remained dead
+            consecutive_tasks = 0
+            current_streak = 0
+            longest_streak_start = first_task
+
+            for task_id in range(first_task, active_task):
+                # Check if neuron was consistently dead in this task
+                if task_id in history:
+                    # Get epochs for this task
+                    epochs = sorted(history[task_id])
+                    if not epochs:
+                        # Break current streak
+                        if current_streak > consecutive_tasks:
+                            consecutive_tasks = current_streak
+                            longest_streak_start = task_id - current_streak
+                        current_streak = 0
+                        continue
+
+                    # Find the maximum epoch for this task
+                    max_epoch = max(epochs)
+
+                    # Check if the last n_epochs are present
+                    required_epochs = list(
+                        range(max_epoch - n_epochs + 1, max_epoch + 1)
+                    )
+                    all_required_epochs_present = True
+
+                    for req_epoch in required_epochs:
+                        if req_epoch not in epochs:
+                            all_required_epochs_present = False
+                            break
+
+                    if all_required_epochs_present:
+                        current_streak += 1
+                    else:
+                        # Break current streak
+                        if current_streak > consecutive_tasks:
+                            consecutive_tasks = current_streak
+                            longest_streak_start = task_id - current_streak
+                        current_streak = 0
+                else:
+                    # Break current streak
+                    if current_streak > consecutive_tasks:
+                        consecutive_tasks = current_streak
+                        longest_streak_start = task_id - current_streak
+                    current_streak = 0
+
+            # Check final streak
+            if current_streak > consecutive_tasks:
+                consecutive_tasks = current_streak
+                longest_streak_start = active_task - current_streak
+
+            # Only consider neurons that remained dead for at least n_tasks consecutive tasks
+            if consecutive_tasks >= n_tasks:
+                consecutively_dead.append(neuron_idx)
+
+                # Record death information
+                first_death_task = min(history.keys())
+                first_death_epoch = min(history[first_death_task])
+                death_info[neuron_idx] = {
+                    "first_death": (first_death_task, first_death_epoch),
+                    "longest_streak_start": longest_streak_start,
+                    "consecutive_tasks": consecutive_tasks,
+                    "death_span": list(
+                        range(
+                            longest_streak_start,
+                            longest_streak_start + consecutive_tasks,
+                        )
+                    ),
+                }
+
+        # Print analysis results
+        print(f"\nConsecutively Dead Neurons Analysis for {layer_name}:")
+        print(f"Total neurons analyzed: {len(all_neurons)}")
+        print(
+            f"Found {len(consecutively_dead)} neurons that remained dead for at least {n_tasks} consecutive tasks"
+        )
+
+        if consecutively_dead:
+            print("\nDetails of consecutively dead neurons:")
+            for neuron_idx in consecutively_dead:
+                info = death_info[neuron_idx]
+                first_task, first_epoch = info["first_death"]
+                death_span = info["death_span"]
+
+                print(f"  Neuron {neuron_idx}:")
+                print(f"    First died at: Task {first_task}, Epoch {first_epoch}")
+                print(
+                    f"    Longest streak: {info['consecutive_tasks']} consecutive tasks (tasks {death_span[0]}-{death_span[-1]})"
+                )
+
+                # Check if still dead in current task
+                is_still_dead = active_task - 1 in history
+                print(
+                    f"    Still dead in most recent task: {'Yes' if is_still_dead else 'No'}"
+                )
+
+        return {
+            "consecutively_dead_neurons": consecutively_dead,
+            "death_info": death_info,
+        }
 
     def find_permanently_dead_neurons(self, layer_name):
         """
@@ -421,6 +751,172 @@ class MammothBackbone(nn.Module):
             writer.writerow(result)
 
         return overlap_ratio
+
+    def find_persistently_reviving_neurons(
+        self, active_task, layer_name, n_epochs=5, min_revive_ratio=0.3
+    ):
+        """
+        Identifies neurons that consistently revive within the last n_epochs of each task.
+
+        A neuron is considered "persistently reviving" if it shows revival patterns in the
+        final n_epochs of each previous task with a revival ratio exceeding the threshold.
+
+        Args:
+            active_task (int): The current task ID
+            layer_name (str): Name of the layer to analyze
+            n_epochs (int): Number of consecutive epochs at the end of each task to check
+            min_revive_ratio (float): Minimum ratio of revivals to deaths required
+                                to consider a neuron as persistently reviving
+
+        Returns:
+            dict: Dictionary containing reviving statistics for each neuron within the window:
+                {
+                    'persistently_reviving_neurons': list of neuron indices,
+                    'reviving_ratios': dict mapping neuron index to its reviving ratio,
+                    'revive_counts': dict mapping neuron index to revival count,
+                    'death_counts': dict mapping neuron index to death count
+                }
+        """
+        if layer_name not in self.dead_neuron_history or active_task <= 0:
+            print(f"Current task: {active_task}, need at least one previous task.")
+            return {
+                "persistently_reviving_neurons": [],
+                "reviving_ratios": {},
+                "revive_counts": {},
+                "death_counts": {},
+            }
+
+        # Get all neurons in this layer
+        all_neurons = set(self.dead_neuron_history[layer_name].keys())
+
+        # Check all previous tasks
+        tasks_to_check = list(range(0, active_task))
+
+        # Initialize statistics dictionaries
+        reviving_stats = {}
+
+        for neuron_idx in all_neurons:
+            history = self.dead_neuron_history[layer_name].get(neuron_idx, {})
+            if not history:
+                continue
+
+            # Track across all previous tasks
+            total_death_count = 0
+            total_revive_count = 0
+            is_consistently_reviving = True
+
+            for task_id in tasks_to_check:
+                if task_id not in history:
+                    continue
+
+                # Get epochs for this task
+                all_epochs = sorted(history[task_id])
+                if not all_epochs:
+                    continue
+
+                # Find the last n_epochs for this task
+                max_epoch = max(all_epochs)
+                window_start = max_epoch - n_epochs + 1
+                window_end = max_epoch
+                window_epochs = [
+                    e for e in all_epochs if window_start <= e <= window_end
+                ]
+
+                if (
+                    not window_epochs or len(window_epochs) < 2
+                ):  # Need at least 2 epochs to detect revival
+                    continue
+
+                # Count deaths and revivals within this window
+                death_count = 0
+                revive_count = 0
+
+                # First epoch in window may be a death if not already dead before
+                was_dead = False
+                for i, epoch in enumerate(window_epochs):
+                    if i == 0:
+                        # First epoch in window is a death
+                        was_dead = True
+                        death_count += 1
+                        continue
+
+                    # Check for gaps (potentially revived and died again)
+                    prev_epoch = window_epochs[i - 1]
+                    if epoch > prev_epoch + 1:
+                        # Gap indicates revival followed by death
+                        revive_count += 1
+                        death_count += 1
+
+                # Calculate revival ratio for this task
+                task_revive_ratio = revive_count / max(death_count, 1)
+
+                # Track totals
+                total_death_count += death_count
+                total_revive_count += revive_count
+
+                # A task needs to have some revival to count as consistently reviving
+                if task_revive_ratio < min_revive_ratio:
+                    is_consistently_reviving = False
+
+            # Calculate overall revival ratio
+            overall_revive_ratio = total_revive_count / max(total_death_count, 1)
+
+            # Store statistics for this neuron
+            reviving_stats[neuron_idx] = {
+                "reviving_ratio": overall_revive_ratio,
+                "revive_count": total_revive_count,
+                "death_count": total_death_count,
+                "consistently_reviving": is_consistently_reviving
+                and total_death_count > 0,
+            }
+
+        # Identify persistently reviving neurons
+        persistently_reviving = []
+        reviving_ratios = {}
+        revive_counts = {}
+        death_counts = {}
+
+        for neuron_idx, stats in reviving_stats.items():
+            if (
+                stats["consistently_reviving"]
+                and stats["reviving_ratio"] >= min_revive_ratio
+            ):
+                persistently_reviving.append(neuron_idx)
+                reviving_ratios[neuron_idx] = stats["reviving_ratio"]
+                revive_counts[neuron_idx] = stats["revive_count"]
+                death_counts[neuron_idx] = stats["death_count"]
+
+        # Sort by reviving ratio (highest first)
+        persistently_reviving = sorted(
+            persistently_reviving, key=lambda n: reviving_ratios[n], reverse=True
+        )
+
+        # Print analysis results
+        print(
+            f"\nPersistently Reviving Neurons Analysis for {layer_name} (in final {n_epochs} epochs of each task):"
+        )
+        print(f"Total neurons analyzed: {len(all_neurons)}")
+        print(
+            f"Found {len(persistently_reviving)} neurons that persistently revive (ratio ≥ {min_revive_ratio})"
+        )
+
+        if persistently_reviving:
+            print("\nTop 10 most frequently reviving neurons:")
+            for idx, neuron in enumerate(persistently_reviving[:10]):
+                print(
+                    f"  {idx+1}. Neuron {neuron}: "
+                    f"Reviving ratio {reviving_ratios[neuron]:.2f} "
+                    f"({revive_counts[neuron]} revivals / {death_counts[neuron]} deaths)"
+                )
+
+        result = {
+            "persistently_reviving_neurons": persistently_reviving,
+            "reviving_ratios": reviving_ratios,
+            "revive_counts": revive_counts,
+            "death_counts": death_counts,
+        }
+
+        return result
 
     def get_reviving_neurons(
         self, layer_name, task_id=None, current_epoch=None, prev_epoch=None

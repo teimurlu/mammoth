@@ -131,6 +131,40 @@ def modify_dead_threshold(threshold):
         print(f"Warning: Couldn't find dead_threshold in {filepath}")
 
 
+def modify_n_epochs_window(n_epochs):
+    """Modify sgd_thesis.py to use the specified n_epochs window size"""
+    filepath = "models/sgd_thesis.py"
+    with open(filepath, "r") as f:
+        content = f.read()
+
+    # Create backup if it doesn't exist (only if not already created by other modify functions)
+    backup_path = f"{filepath}.backup"
+    if not os.path.exists(backup_path):
+        with open(backup_path, "w") as f:
+            f.write(content)
+
+    import re
+
+    # Pattern to find n_epochs=X in specific function calls
+    pattern = r"(find_persistently_(?:dead|reviving)_neurons(?:_accross_tasks)?\([^)]*?n_epochs=)(\d+)"
+    matches = re.findall(pattern, content)
+
+    if matches:
+        # Replace all occurrences with the new value
+        new_content = re.sub(pattern, rf"\g<1>{n_epochs}", content)
+
+        # Write the modified file
+        with open(filepath, "w") as f:
+            f.write(new_content)
+        print(
+            f"Modified {filepath} to use n_epochs={n_epochs} ({len(matches)} occurrences)"
+        )
+    else:
+        print(
+            f"Warning: Couldn't find n_epochs parameter in relevant functions in {filepath}"
+        )
+
+
 def modify_reinitialization_method(use_ghada=False):
     """Modify sgd_thesis.py to use either ours or ghada reinitialization method"""
     filepath = "models/sgd_thesis.py"
@@ -186,41 +220,48 @@ def main():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
 
     # Seeds to use for all experiments
-    seeds = [42]
+    seeds = [57]
+    n_epochs_windows = [50]  # Add the window sizes here
 
     # Basic experiment configurations
     for seed in seeds:
-        output_dir = f"task_accuracies/seeds/{seed}_{timestamp}"
+        output_dir = f"task_accuracies/elahe_feedback/{seed}_{timestamp}"
         os.makedirs(output_dir, exist_ok=True)
 
         # Add baseline experiment (default ReLU)
-        baseline_cmd = f"python3 main.py --model sgd --dataset seq-cifar10 --optimizer sgd --lr 0.1 --n_epochs 10 --backbone resnet18 --seed {seed}"
-        run_experiment(baseline_cmd, output_dir, "01_baseline_sgd_relu", seed=seed)
+        # baseline_cmd = f"python3 main.py --model sgd --dataset seq-cifar10 --optimizer sgd --lr 0.1 --n_epochs 50 --backbone resnet18 --seed {seed}"
+        # run_experiment(baseline_cmd, output_dir, "01_baseline_sgd_relu", seed=seed)
 
         # Run all combinations
         for activation in ["relu"]:
             # Modify activation function
             # modify_activation(activation)
 
-            for dead_threshold in [0.1]:
+            for dead_threshold in [0.05]:
                 # Modify dead neuron threshold
                 modify_dead_threshold(dead_threshold)
 
-                for use_ghada in [False, True]:  # False = ours, True = ghada
-                    # Modify reinitialization method
-                    modify_reinitialization_method(use_ghada)
+                for n_epochs_window in n_epochs_windows:  # Loop through window sizes
+                    # Modify n_epochs window size
+                    modify_n_epochs_window(n_epochs_window)
 
-                    reinit_method = "method1" if use_ghada else "method2"
+                    for use_ghada in [False]:  # False = ours, True = ghada
+                        # Modify reinitialization method
+                        modify_reinitialization_method(use_ghada)
 
-                    # SGD optimizer
-                    sgd_cmd = f"python3 main.py --model sgd-thesis --dataset seq-cifar10 --optimizer sgd --lr 0.1 --n_epochs 10 --backbone resnet18 --seed {seed}"
-                    exp_name = f"{activation}_{dead_threshold}_{reinit_method}_sgd"
-                    run_experiment(sgd_cmd, output_dir, exp_name, seed=seed)
+                        reinit_method = "method1" if use_ghada else "method2"
 
-                    # Adam optimizer
-                    # adam_cmd = f"python3 main.py --model sgd-thesis --dataset seq-cifar10 --optimizer adam --lr 0.001 --n_epochs 10 --backbone resnet18 --seed {seed}"
-                    # exp_name = f"{activation}_{dead_threshold}_{reinit_method}_adam"
-                    # run_experiment(adam_cmd, output_dir, exp_name, seed=seed)
+                        # SGD optimizer
+                        sgd_cmd = f"python3 main.py --model sgd-thesis --dataset seq-cifar10 --optimizer sgd --lr 0.1 --n_epochs 50 --backbone resnet18 --seed {seed}"
+                        # Update experiment name to include n_epochs_window
+                        exp_name = f"{activation}_{dead_threshold}_win{n_epochs_window}_{reinit_method}_sgd"
+                        run_experiment(sgd_cmd, output_dir, exp_name, seed=seed)
+
+                        # Adam optimizer
+                        # adam_cmd = f"python3 main.py --model sgd-thesis --dataset seq-cifar10 --optimizer adam --lr 0.001 --n_epochs 50 --backbone resnet18 --seed {seed}"
+                        # # Update experiment name to include n_epochs_window
+                        # exp_name = f"{activation}_{dead_threshold}_win{n_epochs_window}_{reinit_method}_adam"
+                        # run_experiment(adam_cmd, output_dir, exp_name, seed=seed)
 
     # Restore files to their original state
     restore_files()

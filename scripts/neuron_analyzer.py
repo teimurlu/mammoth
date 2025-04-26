@@ -342,7 +342,7 @@ class NeuronAnalyzer:
 
 def main():
     # Base directory containing multiple log directories
-    base_dir = "/Users/ibrahimteymurlu/Documents/University of Eindhoven/Master Thesis/Repos/mammoth/task_accuracies/seeds"
+    base_dir = "/Users/ibrahimteymurlu/Documents/University of Eindhoven/Master Thesis/Repos/mammoth/task_accuracies/elahe_feedback"
 
     # Find all log directories (assuming each directory contains .log files)
     log_dirs = []

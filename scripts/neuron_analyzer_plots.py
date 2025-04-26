@@ -8,7 +8,7 @@ import glob
 
 # Define the base seeds directory path
 seeds_base_path = Path(
-    "/Users/ibrahimteymurlu/Documents/University of Eindhoven/Master Thesis/Repos/mammoth/task_accuracies/seeds/"
+    "/Users/ibrahimteymurlu/Documents/University of Eindhoven/Master Thesis/Repos/mammoth/task_accuracies/elahe_feedback/"
 )
 
 # Get all subdirectories in the seeds folder (each representing a different seed experiment)

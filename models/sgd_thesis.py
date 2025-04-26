@@ -72,14 +72,19 @@ class Sgd_Thesis(ContinualModel):
         layer = getattr(self.net, layer_name)
 
         # Get reviving neurons between tasks or epochs
-        if current_epoch is not None and prev_epoch is not None:
-            reviving_neurons = self.net.get_reviving_neurons(
-                layer_name, self.active_task, current_epoch, prev_epoch
-            )
-        else:
-            reviving_neurons = self.net.get_reviving_neurons(
-                layer_name, self.active_task
-            )
+        # if current_epoch is not None and prev_epoch is not None:
+        #     reviving_neurons = self.net.get_reviving_neurons(
+        #         layer_name, self.active_task, current_epoch, prev_epoch
+        #     )
+        # else:
+        #     reviving_neurons = self.net.get_reviving_neurons(
+        #         layer_name, self.active_task
+        #     )
+
+        # if current_epoch is not None and prev_epoch is not None:
+        reviving_neurons = self.net.find_persistently_reviving_neurons(
+            active_task=self.active_task, layer_name=layer_name, n_epochs=50
+        )["persistently_reviving_neurons"]
 
         if not reviving_neurons:
             return
@@ -140,14 +145,19 @@ class Sgd_Thesis(ContinualModel):
         layer = getattr(self.net, layer_name)
 
         # Get reviving neurons between tasks or epochs
-        if current_epoch is not None and prev_epoch is not None:
-            reviving_neurons = self.net.get_reviving_neurons(
-                layer_name, self.active_task, current_epoch, prev_epoch
-            )
-        else:
-            reviving_neurons = self.net.get_reviving_neurons(
-                layer_name, self.active_task
-            )
+        # if current_epoch is not None and prev_epoch is not None:
+        #     reviving_neurons = self.net.get_reviving_neurons(
+        #         layer_name, self.active_task, current_epoch, prev_epoch
+        #     )
+        # else:
+        #     reviving_neurons = self.net.get_reviving_neurons(
+        #         layer_name, self.active_task
+        #     )
+
+        # if current_epoch is not None and prev_epoch is not None:
+        reviving_neurons = self.net.find_persistently_reviving_neurons(
+            active_task=self.active_task, layer_name=layer_name, n_epochs=50
+        )["persistently_reviving_neurons"]
 
         if not reviving_neurons:
             return
@@ -379,6 +389,14 @@ class Sgd_Thesis(ContinualModel):
 
             result = self.net.find_permanently_dead_neurons(layer_name)
             permanently_dead_neurons = result["permanent_dead_neurons"]
+            # permanently_dead_neurons = (
+            #     self.net.find_persistently_dead_neurons_accross_tasks(
+            #         active_task=self.active_task,
+            #         layer_name=layer_name,
+            #         n_epochs=50,
+            #         n_tasks=2,
+            #     )
+            # )["consecutively_dead_neurons"]
 
             if not permanently_dead_neurons:
                 return
@@ -457,6 +475,14 @@ class Sgd_Thesis(ContinualModel):
         layer_seq = getattr(self.net, layer_name)
         result = self.net.find_permanently_dead_neurons(layer_name)
         permanently_dead_neurons = result["permanent_dead_neurons"]
+        # permanently_dead_neurons = (
+        #     self.net.find_persistently_dead_neurons_accross_tasks(
+        #         active_task=self.active_task,
+        #         layer_name=layer_name,
+        #         n_epochs=50,
+        #         n_tasks=2,
+        #     )
+        # )["consecutively_dead_neurons"]
 
         if not permanently_dead_neurons:
             return
@@ -1298,12 +1324,24 @@ class Sgd_Thesis(ContinualModel):
         print(f"Epoch {epoch}:")
         # self.net.check_inactive_neurons(show_histogram=True)
         for layer_name in ["conv1", "layer1", "layer2", "layer3", "layer4"]:
+            # for layer_name in ["layer3", "layer4"]:
             self.net.analyze_layer_activations(
-                layer_name, self.active_task, epoch, dead_threshold=0.1, top_k=10
+                layer_name, self.active_task, epoch, dead_threshold=0.05, top_k=10
             )
 
-            # if epoch > 0:
-            #     self.reinitialize_reviving_neurons_method2(layer_name, epoch, epoch - 1)
+            if epoch != 0 and epoch % 10 == 0:
+                self.reinitialize_reviving_neurons_method2(layer_name)
+                self.prune_dead_neurons(layer_name)
+
+        total_pruned = (
+            sum(self.pruned_neurons_count.values())
+            if hasattr(self, "pruned_neurons_count")
+            else 0
+        )
+        if total_pruned > 0:
+            self.verify_pruning_effectiveness()
+            self.rebuild_network_with_pruning()
+        self.fix_dimension_mismatches(debug=False)
 
     def end_task(self, dataset):
         """
@@ -1335,23 +1373,27 @@ class Sgd_Thesis(ContinualModel):
 
     def begin_task(self, dataset):
         if self.active_task > 0:
-            for layer_name in ["conv1", "layer1", "layer2", "layer3", "layer4"]:
-                if layer_name in self.net.dead_neuron_history:
-                    # self.reinitialize_reviving_neurons_method2(layer_name)
-                    self.net.find_persistently_dead_neurons(
-                        active_task=self.active_task, layer_name=layer_name
-                    )
-                    # self.prune_dead_neurons(layer_name)
-
-            # total_pruned = (
-            #     sum(self.pruned_neurons_count.values())
-            #     if hasattr(self, "pruned_neurons_count")
-            #     else 0
+            # for layer_name in ["conv1", "layer1", "layer2", "layer3", "layer4"]:
+            # if layer_name in self.net.dead_neuron_history:
+            #     self.reinitialize_reviving_neurons_method2(layer_name)
+            # self.net.find_persistently_dead_neurons_accross_tasks_accross_tasks(
+            #     active_task=self.active_task, layer_name=layer_name
             # )
-            # if total_pruned > 0:
-            #     self.verify_pruning_effectiveness()
-            #     self.rebuild_network_with_pruning()
-            # self.fix_dimension_mismatches(debug=False)
+            # self.net.find_persistently_reviving_neurons(
+            #     active_task=self.active_task, layer_name=layer_name
+            # )
+            # self.prune_dead_neurons(layer_name)
+
+            self.net.save_combined_neuron_analysis(self.active_task)
+        # total_pruned = (
+        #     sum(self.pruned_neurons_count.values())
+        #     if hasattr(self, "pruned_neurons_count")
+        #     else 0
+        # )
+        # if total_pruned > 0:
+        #     self.verify_pruning_effectiveness()
+        #     self.rebuild_network_with_pruning()
+        # self.fix_dimension_mismatches(debug=False)
 
     def observe_sam(self, inputs, labels, not_aug_inputs, epoch=None, **kwargs):
         """
